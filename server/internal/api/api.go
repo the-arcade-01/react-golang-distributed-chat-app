@@ -18,6 +18,12 @@ func (s *Server) mountMiddlewares() {
 func (s *Server) mountHandlers() {
 	apiService := service.NewApiService()
 	s.Router.Get("/greet", apiService.Greet)
+	s.Router.Post("/auth/login", apiService.Login)
+	s.Router.Post("/auth/signup", apiService.Signup)
+
+	s.Router.Get("/db/count", apiService.GetUsersTotalCount)
+	s.Router.Get("/redis", apiService.GetRedisValue)
+	s.Router.Post("/redis", apiService.SetRedisValue)
 }
 
 func CreateNewServer() *Server {

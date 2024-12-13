@@ -4,8 +4,16 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/joho/godotenv"
 	"github.com/the-arcade-01/go-chat-app/server/internal/api"
 )
+
+func init() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatalln("[NewAppConfig] error loading env props")
+	}
+}
 
 func main() {
 	server := api.CreateNewServer()
