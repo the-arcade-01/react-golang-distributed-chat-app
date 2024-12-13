@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 
 	"github.com/redis/go-redis/v9"
 	"github.com/the-arcade-01/go-chat-app/server/internal/config"
 	"github.com/the-arcade-01/go-chat-app/server/internal/models"
+	"github.com/the-arcade-01/go-chat-app/server/internal/utils"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -23,6 +26,50 @@ func NewRepository() *Repository {
 		redis: appConfig.RedisClient,
 	}
 }
+
+func (repo *Repository) RegisterUser(user *models.User) (string, int, error) {
+	var existingUser models.User
+	if err := repo.db.Where("username = ?", user.Username).First(&existingUser).Error; err == nil {
+		return "", http.StatusConflict, fmt.Errorf("user already exists")
+	}
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", http.StatusInternalServerError, fmt.Errorf("failed to hash password")
+	}
+	user.Password = string(hashedPassword)
+
+	if err := repo.db.Create(&user).Error; err != nil {
+		return "", http.StatusInternalServerError, fmt.Errorf("failed to create user")
+	}
+
+	token, err := utils.GenerateJWT(user.Username)
+	if err != nil {
+		return "", http.StatusInternalServerError, fmt.Errorf("error generating token")
+	}
+
+	return token, http.StatusCreated, nil
+}
+
+func (repo *Repository) LoginUser(user *models.User) (string, int, error) {
+	var existingUser models.User
+	if err := repo.db.Where("username = ?", user.Username).First(&existingUser).Error; err != nil {
+		return "", http.StatusUnauthorized, fmt.Errorf("invalid username or password")
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(existingUser.Password), []byte(user.Password)); err != nil {
+		return "", http.StatusUnauthorized, fmt.Errorf("invalid username or password")
+	}
+
+	token, err := utils.GenerateJWT(user.Username)
+	if err != nil {
+		return "", http.StatusInternalServerError, fmt.Errorf("error generating token")
+	}
+
+	return token, http.StatusOK, nil
+}
+
+/* Below functions need to commented out */
 
 func (repo *Repository) SetValue(ctx context.Context, key, val string) error {
 	status := repo.redis.Set(ctx, key, val, 0)

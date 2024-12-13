@@ -6,9 +6,22 @@ import (
 	"net/http"
 )
 
-type User struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+type Response struct {
+	Status int          `json:"status"`
+	Meta   MetaResponse `json:"meta"`
+	Data   interface{}  `json:"data"`
+}
+
+type MetaResponse struct {
+	Msg string `json:"message"`
+}
+
+func NewResponse(status int, meta MetaResponse, data interface{}) *Response {
+	return &Response{
+		Status: status,
+		Meta:   meta,
+		Data:   data,
+	}
 }
 
 func ResponseWithJSON(w http.ResponseWriter, status int, payload interface{}) {
