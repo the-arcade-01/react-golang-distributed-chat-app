@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/the-arcade-01/go-chat-app/server/internal/config"
 	"github.com/the-arcade-01/go-chat-app/server/internal/models"
@@ -69,34 +70,97 @@ func (repo *Repository) LoginUser(user *models.User) (string, int, error) {
 	return token, http.StatusOK, nil
 }
 
-/* Below functions need to commented out */
-
-func (repo *Repository) SetValue(ctx context.Context, key, val string) error {
-	status := repo.redis.Set(ctx, key, val, 0)
-	cmd, err := status.Result()
-	if err != nil {
-		log.Printf("[SetValue] error on key: %v, val: %v, cmd: %v, err: %v\n", key, val, cmd, err)
-		return fmt.Errorf("error on key: %v, val: %v, please try again with proper values", key, val)
+func (repo *Repository) GetAllUsers() ([]string, error) {
+	var usernames []string
+	if err := repo.db.Model(&models.User{}).Pluck("username", &usernames).Error; err != nil {
+		log.Printf("[GetAllUsers] error %v\n", err)
+		return nil, err
 	}
-	return nil
+	return usernames, nil
 }
 
-func (repo *Repository) GetValue(ctx context.Context, key string) (string, error) {
-	status := repo.redis.Get(ctx, key)
-	cmd, err := status.Result()
-	if err != nil {
-		log.Printf("[GetValue] error on key: %v, cmd: %v, err: %v\n", key, cmd, err)
-		return "", fmt.Errorf("error on key: %v, please try again with proper values", key)
+func (repo *Repository) CreateChatRoom(ctx context.Context, body *models.ChatRoomReqBody, username string) (*models.ChatRoom, int, error) {
+	roomId := uuid.New().String()
+	redisKey := fmt.Sprintf("%v:%v", roomId, body.RoomName)
+
+	status := repo.redis.RPush(ctx, redisKey, username)
+	if err := status.Err(); err != nil {
+		log.Printf("[CreateChatRoom] error on key: %v, username: %v, err: %v\n", redisKey, username, err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("error creating chat room")
 	}
-	return cmd, nil
+
+	chatRoom := &models.ChatRoom{
+		RoomId:   roomId,
+		RoomName: body.RoomName,
+	}
+
+	return chatRoom, http.StatusCreated, nil
 }
 
-func (repo *Repository) GetCount(ctx context.Context) (int64, error) {
-	var count int64
-	err := repo.db.WithContext(ctx).Model(&models.User{}).Count(&count).Error
+func (repo *Repository) AddUserToChatRoom(ctx context.Context, body *models.ChatRoomAddUserReqBody) (int, error) {
+	redisKey := fmt.Sprintf("%v:%v", body.RoomId, body.RoomName)
+	exists, err := repo.redis.Exists(ctx, redisKey).Result()
+
 	if err != nil {
-		log.Printf("[GetCount] error %v\n", err)
-		return 0, fmt.Errorf("error occurred, please try again later")
+		log.Printf("[AddUserToChatRoom] error checking key existence: %v, err: %v\n", redisKey, err)
+		return http.StatusInternalServerError, fmt.Errorf("error checking key existence")
 	}
-	return count, nil
+	if exists == 0 {
+		log.Printf("[AddUserToChatRoom] key does not exist: %v\n", redisKey)
+		return http.StatusBadRequest, fmt.Errorf("chat room does not exist")
+	}
+
+	status := repo.redis.RPush(ctx, redisKey, convertToInterfaceSlice(body.Users))
+	if err := status.Err(); err != nil {
+		log.Printf("[AddUserToChatRoom] error on key: %v, err: %v\n", redisKey, err)
+		return http.StatusInternalServerError, fmt.Errorf("error adding user to chat room")
+	}
+
+	return http.StatusCreated, nil
+}
+
+func (repo *Repository) RemoveUserFromChatRoom(ctx context.Context, roomId, roomName, username string) (int, error) {
+	redisKey := fmt.Sprintf("%v:%v", roomId, roomName)
+	exists, err := repo.redis.Exists(ctx, redisKey).Result()
+	if err != nil {
+		log.Printf("[RemoveUserFromChatRoom] error checking key existence: %v, err: %v\n", redisKey, err)
+		return http.StatusInternalServerError, fmt.Errorf("error checking key existence")
+	}
+	if exists == 0 {
+		log.Printf("[RemoveUserFromChatRoom] key does not exist: %v\n", redisKey)
+		return http.StatusBadRequest, fmt.Errorf("chat room does not exist")
+	}
+	status := repo.redis.LRem(ctx, redisKey, 0, username)
+	if err := status.Err(); err != nil {
+		log.Printf("[RemoveUserFromChatRoom] error on key: %v, username: %v, err: %v\n", redisKey, username, err)
+		return http.StatusInternalServerError, fmt.Errorf("error removing user from chat room")
+	}
+	return http.StatusAccepted, nil
+}
+
+func (repo *Repository) ListUsersInChatRoom(ctx context.Context, roomId, roomName string) ([]string, int, error) {
+	redisKey := fmt.Sprintf("%v:%v", roomId, roomName)
+	exists, err := repo.redis.Exists(ctx, redisKey).Result()
+	if err != nil {
+		log.Printf("[ListUsersInChatRoom] error checking key existence: %v, err: %v\n", redisKey, err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("error checking key existence")
+	}
+	if exists == 0 {
+		log.Printf("[ListUsersInChatRoom] key does not exist: %v\n", redisKey)
+		return nil, http.StatusBadRequest, fmt.Errorf("chat room does not exist")
+	}
+	users, err := repo.redis.LRange(ctx, redisKey, 0, -1).Result()
+	if err != nil {
+		log.Printf("[ListUsersInChatRoom] error on key: %v, err: %v\n", redisKey, err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("error retrieving users from chat room")
+	}
+	return users, http.StatusOK, nil
+}
+
+func convertToInterfaceSlice(s []string) []interface{} {
+	result := make([]interface{}, len(s))
+	for i, v := range s {
+		result[i] = v
+	}
+	return result
 }

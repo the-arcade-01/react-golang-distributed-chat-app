@@ -41,11 +41,12 @@ func (s *Server) mountHandlers() {
 		r.Use(jwtauth.Verifier(tokenAuth))
 		r.Use(jwtauth.Authenticator(tokenAuth))
 		r.Get("/auth/greet", apiService.AuthGreet)
+		r.Get("/db/users", apiService.GetAllUsers)
+		r.Post("/chat/room", apiService.CreateChatRoom)
+		r.Get("/chat/room/users", apiService.ListUsersInChatRoom)
+		r.Post("/chat/room/users", apiService.AddUsersToChatRoom)
+		r.Delete("/chat/room/users", apiService.RemoveUserFromChatRoom)
 	})
-
-	// s.Router.Get("/db/count", apiService.GetUsersTotalCount)
-	// s.Router.Get("/redis", apiService.GetRedisValue)
-	// s.Router.Post("/redis", apiService.SetRedisValue)
 }
 
 func CreateNewServer() *Server {

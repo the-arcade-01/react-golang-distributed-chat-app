@@ -68,42 +68,136 @@ func (s *ApiService) Login(w http.ResponseWriter, r *http.Request) {
 	models.ResponseWithJSON(w, http.StatusOK, models.NewResponse(http.StatusCreated, models.MetaResponse{Msg: "user logged in successfully"}, models.UserLoginResponse{Token: token}))
 }
 
-/* Below functions need to commented out */
-
-func (s *ApiService) SetRedisValue(w http.ResponseWriter, r *http.Request) {
-	key := r.URL.Query().Get("key")
-	val := r.URL.Query().Get("val")
-	if len(key) == 0 || len(val) == 0 {
-		models.ResponseWithJSON(w, http.StatusBadRequest, "please provide correct values in key and val")
-		return
-	}
-	err := s.repo.SetValue(r.Context(), key, val)
+func (s *ApiService) GetAllUsers(w http.ResponseWriter, r *http.Request) {
+	_, claims, err := jwtauth.FromContext(r.Context())
 	if err != nil {
-		models.ResponseWithJSON(w, http.StatusInternalServerError, err)
+		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
-	models.ResponseWithJSON(w, http.StatusOK, "key and value set successfully")
+	_, ok := claims["username"].(string)
+	if !ok {
+		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid token claims")
+		return
+	}
+	users, err := s.repo.GetAllUsers()
+	if err != nil {
+		models.ResponseWithJSON(w, http.StatusInternalServerError, "error on the server")
+		return
+	}
+
+	models.ResponseWithJSON(w, http.StatusOK, models.NewResponse(http.StatusCreated, models.MetaResponse{Msg: "list of all users"}, users))
 }
 
-func (s *ApiService) GetRedisValue(w http.ResponseWriter, r *http.Request) {
-	key := r.URL.Query().Get("key")
-	if len(key) == 0 {
-		models.ResponseWithJSON(w, http.StatusBadRequest, "please provide correct values in key")
-		return
-	}
-	val, err := s.repo.GetValue(r.Context(), key)
+func (s *ApiService) CreateChatRoom(w http.ResponseWriter, r *http.Request) {
+	_, claims, err := jwtauth.FromContext(r.Context())
 	if err != nil {
-		models.ResponseWithJSON(w, http.StatusInternalServerError, err)
+		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
-	models.ResponseWithJSON(w, http.StatusOK, val)
+	username, ok := claims["username"].(string)
+	if !ok {
+		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid token claims")
+		return
+	}
+
+	var body *models.ChatRoomReqBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		models.ResponseWithJSON(w, http.StatusBadRequest, "please provide valid body")
+		return
+	}
+	defer r.Body.Close()
+
+	roomInfo, status, err := s.repo.CreateChatRoom(r.Context(), body, username)
+	if err != nil {
+		models.ResponseWithJSON(w, status, "error on server")
+		return
+	}
+
+	models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: "created room successfully"}, roomInfo))
 }
 
-func (s *ApiService) GetUsersTotalCount(w http.ResponseWriter, r *http.Request) {
-	count, err := s.repo.GetCount(r.Context())
+func (s *ApiService) ListUsersInChatRoom(w http.ResponseWriter, r *http.Request) {
+	_, claims, err := jwtauth.FromContext(r.Context())
 	if err != nil {
-		models.ResponseWithJSON(w, http.StatusInternalServerError, err)
+		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
-	models.ResponseWithJSON(w, http.StatusOK, count)
+	_, ok := claims["username"].(string)
+	if !ok {
+		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid token claims")
+		return
+	}
+
+	roomId := r.URL.Query().Get("roomId")
+	roomName := r.URL.Query().Get("roomName")
+
+	if roomId == "" || roomName == "" {
+		models.ResponseWithJSON(w, http.StatusBadRequest, "missing required parameters")
+		return
+	}
+
+	users, status, err := s.repo.ListUsersInChatRoom(r.Context(), roomId, roomName)
+	if err != nil {
+		models.ResponseWithJSON(w, status, err)
+		return
+	}
+
+	models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: "data fetched successfully"}, users))
+}
+
+func (s *ApiService) AddUsersToChatRoom(w http.ResponseWriter, r *http.Request) {
+	_, claims, err := jwtauth.FromContext(r.Context())
+	if err != nil {
+		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	_, ok := claims["username"].(string)
+	if !ok {
+		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid token claims")
+		return
+	}
+
+	var body *models.ChatRoomAddUserReqBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		models.ResponseWithJSON(w, http.StatusBadRequest, "please provide valid body")
+		return
+	}
+	defer r.Body.Close()
+
+	status, err := s.repo.AddUserToChatRoom(r.Context(), body)
+	if err != nil {
+		models.ResponseWithJSON(w, status, err)
+		return
+	}
+	models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: "users added successfully"}, nil))
+}
+
+func (s *ApiService) RemoveUserFromChatRoom(w http.ResponseWriter, r *http.Request) {
+	_, claims, err := jwtauth.FromContext(r.Context())
+	if err != nil {
+		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid token")
+		return
+	}
+	_, ok := claims["username"].(string)
+	if !ok {
+		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid token claims")
+		return
+	}
+
+	roomId := r.URL.Query().Get("roomId")
+	roomName := r.URL.Query().Get("roomName")
+	username := r.URL.Query().Get("username")
+
+	if roomId == "" || roomName == "" || username == "" {
+		models.ResponseWithJSON(w, http.StatusBadRequest, "missing required parameters")
+		return
+	}
+
+	status, err := s.repo.RemoveUserFromChatRoom(r.Context(), roomId, roomName, username)
+	if err != nil {
+		models.ResponseWithJSON(w, status, err)
+		return
+	}
+
+	models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: "user removed successfully"}, nil))
 }
