@@ -46,6 +46,7 @@ func (s *Server) mountHandlers() {
 		r.Get("/chat/room/users", apiService.ListUsersInChatRoom)
 		r.Post("/chat/room/users", apiService.AddUsersToChatRoom)
 		r.Delete("/chat/room/users", apiService.RemoveUserFromChatRoom)
+		r.Get("/ws/chat", apiService.JoinChatRoom)
 	})
 }
 

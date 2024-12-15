@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
 	"github.com/the-arcade-01/go-chat-app/server/internal/config"
 	"github.com/the-arcade-01/go-chat-app/server/internal/models"
@@ -155,6 +156,23 @@ func (repo *Repository) ListUsersInChatRoom(ctx context.Context, roomId, roomNam
 		return nil, http.StatusInternalServerError, fmt.Errorf("error retrieving users from chat room")
 	}
 	return users, http.StatusOK, nil
+}
+
+func (repo *Repository) PublishMessageToChatRoom(ctx context.Context, channel, msg string) error {
+	return repo.redis.Publish(ctx, channel, msg).Err()
+}
+
+func (repo *Repository) SubscribeToChatRoom(ctx context.Context, conn *websocket.Conn, channel string) {
+	pubSub := repo.redis.Subscribe(ctx, channel)
+	defer pubSub.Close()
+
+	ch := pubSub.Channel()
+	for msg := range ch {
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(msg.Payload)); err != nil {
+			log.Printf("[SubscribeToChatRoom] Failed to send msg to websocket for channel:%v : %v", channel, err)
+			return
+		}
+	}
 }
 
 func convertToInterfaceSlice(s []string) []interface{} {
