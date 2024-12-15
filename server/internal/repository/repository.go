@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
 	"github.com/the-arcade-01/go-chat-app/server/internal/config"
@@ -29,9 +28,9 @@ func NewRepository() *Repository {
 	}
 }
 
-func (repo *Repository) RegisterUser(user *models.User) (string, int, error) {
+func (repo *Repository) RegisterUser(ctx context.Context, user *models.User) (string, int, error) {
 	var existingUser models.User
-	if err := repo.db.Where("username = ?", user.Username).First(&existingUser).Error; err == nil {
+	if err := repo.db.WithContext(ctx).Where("username = ?", user.Username).First(&existingUser).Error; err == nil {
 		return "", http.StatusConflict, fmt.Errorf("user already exists")
 	}
 
@@ -41,7 +40,7 @@ func (repo *Repository) RegisterUser(user *models.User) (string, int, error) {
 	}
 	user.Password = string(hashedPassword)
 
-	if err := repo.db.Create(&user).Error; err != nil {
+	if err := repo.db.WithContext(ctx).Create(&user).Error; err != nil {
 		return "", http.StatusInternalServerError, fmt.Errorf("failed to create user")
 	}
 
@@ -53,9 +52,9 @@ func (repo *Repository) RegisterUser(user *models.User) (string, int, error) {
 	return token, http.StatusCreated, nil
 }
 
-func (repo *Repository) LoginUser(user *models.User) (string, int, error) {
+func (repo *Repository) LoginUser(ctx context.Context, user *models.User) (string, int, error) {
 	var existingUser models.User
-	if err := repo.db.Where("username = ?", user.Username).First(&existingUser).Error; err != nil {
+	if err := repo.db.WithContext(ctx).Where("username = ?", user.Username).First(&existingUser).Error; err != nil {
 		return "", http.StatusUnauthorized, fmt.Errorf("invalid username or password")
 	}
 
@@ -71,91 +70,108 @@ func (repo *Repository) LoginUser(user *models.User) (string, int, error) {
 	return token, http.StatusOK, nil
 }
 
-func (repo *Repository) GetAllUsers() ([]string, error) {
+func (repo *Repository) GetAllUsers(ctx context.Context) ([]string, error) {
 	var usernames []string
-	if err := repo.db.Model(&models.User{}).Pluck("username", &usernames).Error; err != nil {
+	if err := repo.db.WithContext(ctx).Model(&models.User{}).Pluck("username", &usernames).Error; err != nil {
 		log.Printf("[GetAllUsers] error %v\n", err)
 		return nil, err
 	}
 	return usernames, nil
 }
 
-func (repo *Repository) CreateChatRoom(ctx context.Context, body *models.ChatRoomReqBody, username string) (*models.ChatRoom, int, error) {
-	roomId := uuid.New().String()
-	redisKey := fmt.Sprintf("%v:%v", roomId, body.RoomName)
-
-	status := repo.redis.RPush(ctx, redisKey, username)
-	if err := status.Err(); err != nil {
-		log.Printf("[CreateChatRoom] error on key: %v, username: %v, err: %v\n", redisKey, username, err)
-		return nil, http.StatusInternalServerError, fmt.Errorf("error creating chat room")
-	}
-
-	chatRoom := &models.ChatRoom{
-		RoomId:   roomId,
+func (repo *Repository) CreateRoom(ctx context.Context, body *models.CreateRoomReqBody, username string) (*models.Room, int, error) {
+	room := &models.Room{
 		RoomName: body.RoomName,
+		Admin:    username,
 	}
 
-	return chatRoom, http.StatusCreated, nil
+	if err := repo.db.WithContext(ctx).Create(&room).Error; err != nil {
+		log.Printf("[CreateRoom] error creating room: %v\n", err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("error creating room")
+	}
+
+	return room, http.StatusCreated, nil
 }
 
-func (repo *Repository) AddUserToChatRoom(ctx context.Context, body *models.ChatRoomAddUserReqBody) (int, error) {
-	redisKey := fmt.Sprintf("%v:%v", body.RoomId, body.RoomName)
-	exists, err := repo.redis.Exists(ctx, redisKey).Result()
-
-	if err != nil {
-		log.Printf("[AddUserToChatRoom] error checking key existence: %v, err: %v\n", redisKey, err)
-		return http.StatusInternalServerError, fmt.Errorf("error checking key existence")
-	}
-	if exists == 0 {
-		log.Printf("[AddUserToChatRoom] key does not exist: %v\n", redisKey)
-		return http.StatusBadRequest, fmt.Errorf("chat room does not exist")
+func (repo *Repository) DeleteRoom(ctx context.Context, roomId int, username string) (int, error) {
+	var room models.Room
+	if err := repo.db.WithContext(ctx).First(&room, roomId).Error; err != nil {
+		return http.StatusNotFound, fmt.Errorf("room not found")
 	}
 
-	status := repo.redis.RPush(ctx, redisKey, convertToInterfaceSlice(body.Users))
-	if err := status.Err(); err != nil {
-		log.Printf("[AddUserToChatRoom] error on key: %v, err: %v\n", redisKey, err)
-		return http.StatusInternalServerError, fmt.Errorf("error adding user to chat room")
+	if room.Admin != username {
+		return http.StatusForbidden, fmt.Errorf("only the admin can delete the room")
 	}
 
-	return http.StatusCreated, nil
+	if err := repo.db.WithContext(ctx).Delete(&room).Error; err != nil {
+		log.Printf("[DeleteRoom] error deleting room: %v\n", err)
+		return http.StatusInternalServerError, fmt.Errorf("error deleting room")
+	}
+
+	return http.StatusOK, nil
 }
 
-func (repo *Repository) RemoveUserFromChatRoom(ctx context.Context, roomId, roomName, username string) (int, error) {
-	redisKey := fmt.Sprintf("%v:%v", roomId, roomName)
-	exists, err := repo.redis.Exists(ctx, redisKey).Result()
+func (repo *Repository) GetUsersRooms(ctx context.Context, username string) ([]*models.Room, int, error) {
+	var rooms []*models.Room
+	err := repo.db.WithContext(ctx).Where("admin = ?", username).Find(&rooms).Error
 	if err != nil {
-		log.Printf("[RemoveUserFromChatRoom] error checking key existence: %v, err: %v\n", redisKey, err)
-		return http.StatusInternalServerError, fmt.Errorf("error checking key existence")
+		log.Printf("[GetUsersRooms] error finding rooms for user %s: %v\n", username, err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("error finding rooms for user")
 	}
-	if exists == 0 {
-		log.Printf("[RemoveUserFromChatRoom] key does not exist: %v\n", redisKey)
-		return http.StatusBadRequest, fmt.Errorf("chat room does not exist")
-	}
-	status := repo.redis.LRem(ctx, redisKey, 0, username)
-	if err := status.Err(); err != nil {
-		log.Printf("[RemoveUserFromChatRoom] error on key: %v, username: %v, err: %v\n", redisKey, username, err)
-		return http.StatusInternalServerError, fmt.Errorf("error removing user from chat room")
-	}
-	return http.StatusAccepted, nil
+	return rooms, http.StatusOK, nil
 }
 
-func (repo *Repository) ListUsersInChatRoom(ctx context.Context, roomId, roomName string) ([]string, int, error) {
-	redisKey := fmt.Sprintf("%v:%v", roomId, roomName)
-	exists, err := repo.redis.Exists(ctx, redisKey).Result()
-	if err != nil {
-		log.Printf("[ListUsersInChatRoom] error checking key existence: %v, err: %v\n", redisKey, err)
-		return nil, http.StatusInternalServerError, fmt.Errorf("error checking key existence")
+func (repo *Repository) AddUsersToRoom(ctx context.Context, body *models.AddUsersToRoomReqBody, username string) (int, error) {
+	var room models.Room
+	if err := repo.db.WithContext(ctx).First(&room, body.RoomId).Error; err != nil {
+		return http.StatusNotFound, fmt.Errorf("room not found")
 	}
-	if exists == 0 {
-		log.Printf("[ListUsersInChatRoom] key does not exist: %v\n", redisKey)
-		return nil, http.StatusBadRequest, fmt.Errorf("chat room does not exist")
+
+	if room.Admin != username {
+		return http.StatusUnauthorized, fmt.Errorf("only the admin can add users to room")
 	}
-	users, err := repo.redis.LRange(ctx, redisKey, 0, -1).Result()
-	if err != nil {
-		log.Printf("[ListUsersInChatRoom] error on key: %v, err: %v\n", redisKey, err)
-		return nil, http.StatusInternalServerError, fmt.Errorf("error retrieving users from chat room")
+
+	var userRooms []models.UserRooms
+	for _, user := range body.Users {
+		userRooms = append(userRooms, models.UserRooms{
+			Username: user,
+			RoomId:   body.RoomId,
+		})
 	}
-	return users, http.StatusOK, nil
+
+	if err := repo.db.WithContext(ctx).Create(&userRooms).Error; err != nil {
+		log.Printf("[AddUsersToRoom] error adding users to room %d: %v\n", body.RoomId, err)
+		return http.StatusInternalServerError, fmt.Errorf("error adding users to room")
+	}
+
+	return http.StatusOK, nil
+}
+
+func (repo *Repository) RemoveUserFromRoom(ctx context.Context, roomId int, removeUser, username string) (int, error) {
+	var room models.Room
+	if err := repo.db.WithContext(ctx).First(&room, roomId).Error; err != nil {
+		return http.StatusNotFound, fmt.Errorf("room not found")
+	}
+
+	if room.Admin != username {
+		return http.StatusUnauthorized, fmt.Errorf("only the admin can remove users from the room")
+	}
+
+	if err := repo.db.WithContext(ctx).Where("room_id = ? AND username = ?", roomId, removeUser).Delete(&models.UserRooms{}).Error; err != nil {
+		log.Printf("[RemoveUserForRoom] error removing user %s from room %d: %v\n", removeUser, roomId, err)
+		return http.StatusInternalServerError, fmt.Errorf("error removing user from room")
+	}
+
+	return http.StatusOK, nil
+}
+
+func (repo *Repository) ListUsersInRoom(ctx context.Context, roomId int) ([]string, int, error) {
+	var usernames []string
+	if err := repo.db.WithContext(ctx).Where("room_id = ?", roomId).Pluck("username", &usernames).Error; err != nil {
+		log.Printf("[ListUsersInRoom] error retrieving users for room %d: %v\n", roomId, err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("error retrieving users for room")
+	}
+	return usernames, http.StatusOK, nil
 }
 
 func (repo *Repository) PublishMessageToChatRoom(ctx context.Context, channel, msg string) error {
@@ -173,12 +189,4 @@ func (repo *Repository) SubscribeToChatRoom(ctx context.Context, conn *websocket
 			return
 		}
 	}
-}
-
-func convertToInterfaceSlice(s []string) []interface{} {
-	result := make([]interface{}, len(s))
-	for i, v := range s {
-		result[i] = v
-	}
-	return result
 }

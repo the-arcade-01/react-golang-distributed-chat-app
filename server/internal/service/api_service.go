@@ -5,12 +5,21 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/jwtauth/v5"
 	"github.com/gorilla/websocket"
 	"github.com/the-arcade-01/go-chat-app/server/internal/models"
 	"github.com/the-arcade-01/go-chat-app/server/internal/repository"
+	"github.com/the-arcade-01/go-chat-app/server/internal/utils"
 )
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
 
 type ApiService struct {
 	repo *repository.Repository
@@ -22,19 +31,15 @@ func NewApiService() *ApiService {
 	}
 }
 
-func (s *ApiService) Greet(w http.ResponseWriter, r *http.Request) {
-	models.ResponseWithJSON(w, http.StatusOK, "Hello, World!!")
-}
-
 func (s *ApiService) AuthGreet(w http.ResponseWriter, r *http.Request) {
 	_, claims, err := jwtauth.FromContext(r.Context())
 	if err != nil {
-		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid token")
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.NewResponse(http.StatusUnauthorized, models.MetaResponse{Msg: "invalid token"}, nil))
 		return
 	}
 	username, ok := claims["username"].(string)
 	if !ok || username == "" {
-		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid or missing username in token claims")
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.NewResponse(http.StatusUnauthorized, models.MetaResponse{Msg: "invalid or missing username in token claims"}, nil))
 		return
 	}
 	models.ResponseWithJSON(w, http.StatusOK, fmt.Sprintf("Hello, %s!", username))
@@ -43,13 +48,14 @@ func (s *ApiService) AuthGreet(w http.ResponseWriter, r *http.Request) {
 func (s *ApiService) Signup(w http.ResponseWriter, r *http.Request) {
 	var body *models.User
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		models.ResponseWithJSON(w, http.StatusBadRequest, "please provide valid body")
+		models.ResponseWithJSON(w, http.StatusBadRequest, models.NewResponse(http.StatusBadRequest, models.MetaResponse{Msg: "please provide valid body"}, nil))
 		return
 	}
 	defer r.Body.Close()
-	token, status, err := s.repo.RegisterUser(body)
+
+	token, status, err := s.repo.RegisterUser(r.Context(), body)
 	if err != nil {
-		models.ResponseWithJSON(w, status, err)
+		models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: err.Error()}, nil))
 		return
 	}
 	models.ResponseWithJSON(w, http.StatusCreated, models.NewResponse(http.StatusCreated, models.MetaResponse{Msg: "user created successfully"}, models.UserLoginResponse{Token: token}))
@@ -58,13 +64,14 @@ func (s *ApiService) Signup(w http.ResponseWriter, r *http.Request) {
 func (s *ApiService) Login(w http.ResponseWriter, r *http.Request) {
 	var body *models.User
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		models.ResponseWithJSON(w, http.StatusBadRequest, "please provide valid body")
+		models.ResponseWithJSON(w, http.StatusBadRequest, models.NewResponse(http.StatusBadRequest, models.MetaResponse{Msg: "please provide valid body"}, nil))
 		return
 	}
 	defer r.Body.Close()
-	token, status, err := s.repo.LoginUser(body)
+
+	token, status, err := s.repo.LoginUser(r.Context(), body)
 	if err != nil {
-		models.ResponseWithJSON(w, status, err)
+		models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: err.Error()}, nil))
 		return
 	}
 	models.ResponseWithJSON(w, http.StatusOK, models.NewResponse(http.StatusCreated, models.MetaResponse{Msg: "user logged in successfully"}, models.UserLoginResponse{Token: token}))
@@ -73,141 +80,180 @@ func (s *ApiService) Login(w http.ResponseWriter, r *http.Request) {
 func (s *ApiService) GetAllUsers(w http.ResponseWriter, r *http.Request) {
 	_, claims, err := jwtauth.FromContext(r.Context())
 	if err != nil {
-		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid token")
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.NewResponse(http.StatusUnauthorized, models.MetaResponse{Msg: "invalid token"}, nil))
 		return
 	}
 	username, ok := claims["username"].(string)
 	if !ok || username == "" {
-		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid or missing username in token claims")
-		return
-	}
-	users, err := s.repo.GetAllUsers()
-	if err != nil {
-		models.ResponseWithJSON(w, http.StatusInternalServerError, "error on the server")
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.NewResponse(http.StatusUnauthorized, models.MetaResponse{Msg: "invalid or missing username in token claims"}, nil))
 		return
 	}
 
+	users, err := s.repo.GetAllUsers(r.Context())
+	if err != nil {
+		models.ResponseWithJSON(w, http.StatusInternalServerError, models.NewResponse(http.StatusUnauthorized, models.MetaResponse{Msg: "error on the server"}, nil))
+		return
+	}
 	models.ResponseWithJSON(w, http.StatusOK, models.NewResponse(http.StatusCreated, models.MetaResponse{Msg: "list of all users"}, users))
 }
 
-func (s *ApiService) CreateChatRoom(w http.ResponseWriter, r *http.Request) {
+func (s *ApiService) CreateRoom(w http.ResponseWriter, r *http.Request) {
 	_, claims, err := jwtauth.FromContext(r.Context())
 	if err != nil {
-		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid token")
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.NewResponse(http.StatusUnauthorized, models.MetaResponse{Msg: "invalid token"}, nil))
 		return
 	}
 	username, ok := claims["username"].(string)
 	if !ok || username == "" {
-		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid or missing username in token claims")
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.NewResponse(http.StatusUnauthorized, models.MetaResponse{Msg: "invalid or missing username in token claims"}, nil))
 		return
 	}
 
-	var body *models.ChatRoomReqBody
+	var body *models.CreateRoomReqBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		models.ResponseWithJSON(w, http.StatusBadRequest, "please provide valid body")
+		models.ResponseWithJSON(w, http.StatusBadRequest, models.NewResponse(http.StatusBadRequest, models.MetaResponse{Msg: "please provide correct body"}, nil))
 		return
 	}
-	defer r.Body.Close()
 
-	roomInfo, status, err := s.repo.CreateChatRoom(r.Context(), body, username)
+	room, status, err := s.repo.CreateRoom(r.Context(), body, username)
 	if err != nil {
-		models.ResponseWithJSON(w, status, "error on server")
+		models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: err.Error()}, nil))
 		return
 	}
-
-	models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: "created room successfully"}, roomInfo))
+	models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: "Room created successfully"}, room))
 }
 
-func (s *ApiService) ListUsersInChatRoom(w http.ResponseWriter, r *http.Request) {
+func (s *ApiService) DeleteRoom(w http.ResponseWriter, r *http.Request) {
 	_, claims, err := jwtauth.FromContext(r.Context())
 	if err != nil {
-		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid token")
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.NewResponse(http.StatusUnauthorized, models.MetaResponse{Msg: "invalid token"}, nil))
 		return
 	}
 	username, ok := claims["username"].(string)
 	if !ok || username == "" {
-		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid or missing username in token claims")
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.NewResponse(http.StatusUnauthorized, models.MetaResponse{Msg: "invalid or missing username in token claims"}, nil))
 		return
 	}
 
-	roomId := r.URL.Query().Get("roomId")
-	roomName := r.URL.Query().Get("roomName")
-
-	if roomId == "" || roomName == "" {
-		models.ResponseWithJSON(w, http.StatusBadRequest, "missing required parameters")
-		return
-	}
-
-	users, status, err := s.repo.ListUsersInChatRoom(r.Context(), roomId, roomName)
+	id := chi.URLParam(r, "roomId")
+	roomId, err := strconv.Atoi(id)
 	if err != nil {
-		models.ResponseWithJSON(w, status, err)
+		models.ResponseWithJSON(w, http.StatusBadRequest, models.NewResponse(http.StatusBadRequest, models.MetaResponse{Msg: "please provide correct roomId"}, nil))
 		return
 	}
 
-	models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: "data fetched successfully"}, users))
+	status, err := s.repo.DeleteRoom(r.Context(), roomId, username)
+	if err != nil {
+		models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: err.Error()}, nil))
+		return
+	}
+	models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: "room deleted successfully"}, nil))
 }
 
-func (s *ApiService) AddUsersToChatRoom(w http.ResponseWriter, r *http.Request) {
+func (s *ApiService) GetUsersRooms(w http.ResponseWriter, r *http.Request) {
 	_, claims, err := jwtauth.FromContext(r.Context())
 	if err != nil {
-		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid token")
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.NewResponse(http.StatusUnauthorized, models.MetaResponse{Msg: "invalid token"}, nil))
 		return
 	}
 	username, ok := claims["username"].(string)
 	if !ok || username == "" {
-		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid or missing username in token claims")
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.NewResponse(http.StatusUnauthorized, models.MetaResponse{Msg: "invalid or missing username in token claims"}, nil))
 		return
 	}
 
-	var body *models.ChatRoomAddUserReqBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		models.ResponseWithJSON(w, http.StatusBadRequest, "please provide valid body")
-		return
-	}
-	defer r.Body.Close()
-
-	status, err := s.repo.AddUserToChatRoom(r.Context(), body)
+	rooms, status, err := s.repo.GetUsersRooms(r.Context(), username)
 	if err != nil {
-		models.ResponseWithJSON(w, status, err)
+		models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: err.Error()}, nil))
+		return
+	}
+	models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: "list of all rooms"}, rooms))
+}
+
+func (s *ApiService) AddUserToRoom(w http.ResponseWriter, r *http.Request) {
+	_, claims, err := jwtauth.FromContext(r.Context())
+	if err != nil {
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.NewResponse(http.StatusUnauthorized, models.MetaResponse{Msg: "invalid token"}, nil))
+		return
+	}
+	username, ok := claims["username"].(string)
+	if !ok || username == "" {
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.NewResponse(http.StatusUnauthorized, models.MetaResponse{Msg: "invalid or missing username in token claims"}, nil))
+		return
+	}
+
+	var body *models.AddUsersToRoomReqBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		models.ResponseWithJSON(w, http.StatusBadRequest, models.NewResponse(http.StatusBadRequest, models.MetaResponse{Msg: "please provide correct body"}, nil))
+		return
+	}
+
+	status, err := s.repo.AddUsersToRoom(r.Context(), body, username)
+	if err != nil {
+		models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: err.Error()}, nil))
 		return
 	}
 	models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: "users added successfully"}, nil))
 }
 
-func (s *ApiService) RemoveUserFromChatRoom(w http.ResponseWriter, r *http.Request) {
+func (s *ApiService) RemoveUserFromRoom(w http.ResponseWriter, r *http.Request) {
 	_, claims, err := jwtauth.FromContext(r.Context())
 	if err != nil {
-		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid token")
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.NewResponse(http.StatusUnauthorized, models.MetaResponse{Msg: "invalid token"}, nil))
 		return
 	}
-	_, ok := claims["username"].(string)
-	if !ok {
-		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid token claims")
-		return
-	}
-
-	roomId := r.URL.Query().Get("roomId")
-	roomName := r.URL.Query().Get("roomName")
-	username := r.URL.Query().Get("username")
-
-	if roomId == "" || roomName == "" || username == "" {
-		models.ResponseWithJSON(w, http.StatusBadRequest, "missing required parameters")
+	username, ok := claims["username"].(string)
+	if !ok || username == "" {
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.NewResponse(http.StatusUnauthorized, models.MetaResponse{Msg: "invalid or missing username in token claims"}, nil))
 		return
 	}
 
-	status, err := s.repo.RemoveUserFromChatRoom(r.Context(), roomId, roomName, username)
+	roomIdStr := r.URL.Query().Get("roomId")
+	roomId, err := strconv.Atoi(roomIdStr)
 	if err != nil {
-		models.ResponseWithJSON(w, status, err)
+		models.ResponseWithJSON(w, http.StatusBadRequest, models.NewResponse(http.StatusBadRequest, models.MetaResponse{Msg: "please provide correct roomId"}, nil))
 		return
 	}
 
+	removeUser := r.URL.Query().Get("username")
+	if removeUser == "" {
+		models.ResponseWithJSON(w, http.StatusBadRequest, models.NewResponse(http.StatusBadRequest, models.MetaResponse{Msg: "please provide correct username to remove"}, nil))
+		return
+	}
+
+	status, err := s.repo.RemoveUserFromRoom(r.Context(), roomId, removeUser, username)
+	if err != nil {
+		models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: err.Error()}, nil))
+		return
+	}
 	models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: "user removed successfully"}, nil))
 }
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
+func (s *ApiService) ListUsersInRoom(w http.ResponseWriter, r *http.Request) {
+	_, claims, err := jwtauth.FromContext(r.Context())
+	if err != nil {
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.NewResponse(http.StatusUnauthorized, models.MetaResponse{Msg: "invalid token"}, nil))
+		return
+	}
+	username, ok := claims["username"].(string)
+	if !ok || username == "" {
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.NewResponse(http.StatusUnauthorized, models.MetaResponse{Msg: "invalid or missing username in token claims"}, nil))
+		return
+	}
+
+	roomIdStr := r.URL.Query().Get("roomId")
+	roomId, err := strconv.Atoi(roomIdStr)
+	if err != nil {
+		models.ResponseWithJSON(w, http.StatusBadRequest, models.NewResponse(http.StatusBadRequest, models.MetaResponse{Msg: "please provide correct roomId"}, nil))
+		return
+	}
+
+	users, status, err := s.repo.ListUsersInRoom(r.Context(), roomId)
+	if err != nil {
+		models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: err.Error()}, nil))
+		return
+	}
+	models.ResponseWithJSON(w, status, models.NewResponse(status, models.MetaResponse{Msg: "fetched users successfully"}, users))
 }
 
 // JoinChatRoom
@@ -216,13 +262,13 @@ var upgrader = websocket.Upgrader{
 func (s *ApiService) JoinChatRoom(w http.ResponseWriter, r *http.Request) {
 	_, claims, err := jwtauth.FromContext(r.Context())
 	if err != nil {
-		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid token")
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.NewResponse(http.StatusUnauthorized, models.MetaResponse{Msg: "invalid token"}, nil))
 		return
 	}
 
 	username, ok := claims["username"].(string)
 	if !ok || username == "" {
-		models.ResponseWithJSON(w, http.StatusUnauthorized, "invalid or missing username in token claims")
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.NewResponse(http.StatusUnauthorized, models.MetaResponse{Msg: "invalid or missing username in token claims"}, nil))
 		return
 	}
 
@@ -230,11 +276,11 @@ func (s *ApiService) JoinChatRoom(w http.ResponseWriter, r *http.Request) {
 	roomName := r.URL.Query().Get("roomName")
 
 	if roomId == "" || roomName == "" {
-		models.ResponseWithJSON(w, http.StatusBadRequest, "missing required parameters")
+		models.ResponseWithJSON(w, http.StatusBadRequest, models.NewResponse(http.StatusBadRequest, models.MetaResponse{Msg: "missing required parameters"}, nil))
 		return
 	}
 
-	channel := fmt.Sprintf("%v:%v_channel", roomId, roomName)
+	channel := utils.GetRedisKey("channel", "_", roomId, roomName)
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {

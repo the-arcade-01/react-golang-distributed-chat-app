@@ -31,3 +31,20 @@ func GenerateJWT(username string) (string, error) {
 
 	return tokenString, nil
 }
+
+func ConvertToInterfaceSlice(s []string) []interface{} {
+	result := make([]interface{}, len(s))
+	for i, v := range s {
+		result[i] = v
+	}
+	return result
+}
+
+func GetRedisKey(prefix, suffix string, items ...string) string {
+	key := prefix + ":"
+	for _, item := range items {
+		key += item + ":"
+	}
+	key += suffix
+	return key
+}

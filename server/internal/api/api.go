@@ -33,7 +33,6 @@ func (s *Server) mountMiddlewares() {
 func (s *Server) mountHandlers() {
 	tokenAuth := jwtauth.New("HS256", []byte(os.Getenv("JWT_SECRET_KEY")), nil)
 	apiService := service.NewApiService()
-	s.Router.Get("/greet", apiService.Greet)
 	s.Router.Post("/auth/login", apiService.Login)
 	s.Router.Post("/auth/signup", apiService.Signup)
 
@@ -41,12 +40,13 @@ func (s *Server) mountHandlers() {
 		r.Use(jwtauth.Verifier(tokenAuth))
 		r.Use(jwtauth.Authenticator(tokenAuth))
 		r.Get("/auth/greet", apiService.AuthGreet)
-		r.Get("/db/users", apiService.GetAllUsers)
-		r.Post("/chat/room", apiService.CreateChatRoom)
-		r.Get("/chat/room/users", apiService.ListUsersInChatRoom)
-		r.Post("/chat/room/users", apiService.AddUsersToChatRoom)
-		r.Delete("/chat/room/users", apiService.RemoveUserFromChatRoom)
-		r.Get("/ws/chat", apiService.JoinChatRoom)
+		r.Get("/users", apiService.GetAllUsers)
+		r.Post("/rooms", apiService.CreateRoom)
+		r.Delete("/rooms", apiService.DeleteRoom)
+		r.Get("/rooms/users", apiService.ListUsersInRoom)
+		r.Post("/rooms/users", apiService.AddUserToRoom)
+		r.Delete("/rooms/users", apiService.RemoveUserFromRoom)
+		r.Get("/users/rooms", apiService.GetUsersRooms)
 	})
 }
 
