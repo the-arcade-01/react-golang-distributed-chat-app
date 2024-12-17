@@ -1,31 +1,51 @@
 package config
 
 import (
+	"database/sql"
 	"log"
+	"os"
 	"sync"
 
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/redis/go-redis/v9"
-	"gorm.io/gorm"
 )
 
 var once sync.Once
-var appConfig *AppConfig
+var config *AppConfig
 
 type AppConfig struct {
-	DbClient    *gorm.DB
-	RedisClient *redis.Client
+	Db    *sql.DB
+	Cache *redis.Client
 }
 
 func NewAppConfig() *AppConfig {
 	once.Do(func() {
-		appConfig = &AppConfig{
-			RedisClient: newRedisClient(),
+		config = &AppConfig{
+			Db:    newDbClient(),
+			Cache: newCacheClient(),
 		}
-		db, err := newDBClient()
-		if err != nil {
-			log.Fatalln(err)
-		}
-		appConfig.DbClient = db
 	})
-	return appConfig
+	return config
+}
+
+func newDbClient() *sql.DB {
+	db, err := sql.Open(os.Getenv("DB_DRIVER"), os.Getenv("DB_URL"))
+	if err != nil {
+		log.Fatalf("[newDbClient] error on establishing db conn, err: %v\n", err)
+	}
+	if err := db.Ping(); err != nil {
+		log.Fatalf("[newDbClient] error on ping db, err: %v\n", err)
+	}
+	log.Println("[newDbClient] db conn established")
+	return db
+}
+
+func newCacheClient() *redis.Client {
+	cache := redis.NewClient(&redis.Options{
+		Addr:     os.Getenv("REDIS_ADDR"),
+		Password: os.Getenv("REDIS_PWD"),
+		DB:       0,
+	})
+	log.Println("[newCacheClient] cache conn established")
+	return cache
 }

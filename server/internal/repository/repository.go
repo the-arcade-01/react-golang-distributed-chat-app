@@ -2,9 +2,14 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
@@ -12,181 +17,195 @@ import (
 	"github.com/the-arcade-01/go-chat-app/server/internal/models"
 	"github.com/the-arcade-01/go-chat-app/server/internal/utils"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
 )
 
 type Repository struct {
-	db    *gorm.DB
-	redis *redis.Client
+	db    *sql.DB
+	cache *redis.Client
 }
 
 func NewRepository() *Repository {
 	appConfig := config.NewAppConfig()
 	return &Repository{
-		db:    appConfig.DbClient,
-		redis: appConfig.RedisClient,
+		db:    appConfig.Db,
+		cache: appConfig.Cache,
 	}
 }
 
-func (repo *Repository) RegisterUser(ctx context.Context, user *models.User) (string, int, error) {
-	var existingUser models.User
-	if err := repo.db.WithContext(ctx).Where("username = ?", user.Username).First(&existingUser).Error; err == nil {
-		return "", http.StatusConflict, fmt.Errorf("user already exists")
+func (r *Repository) CreateUser(ctx context.Context, user *models.User) (*models.UserLoginResponse, int, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		log.Printf("[CreateUser] error on starting transaction: %v\n", err)
+		return nil, http.StatusInternalServerError, errors.New("error on creating user, please try again later")
+	}
+	defer func(tx *sql.Tx) {
+		err := tx.Rollback()
+		if err != nil {
+
+		}
+	}(tx)
+
+	var existingUserID int
+	err = tx.QueryRowContext(ctx, "SELECT id FROM users WHERE username = ?", user.Username).Scan(&existingUserID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		log.Printf("[CreateUser] error on checking existing user for %v, err: %v\n", user.Username, err)
+		return nil, http.StatusInternalServerError, errors.New("error on checking existing user")
+	}
+
+	if existingUserID != 0 {
+		return nil, http.StatusBadRequest, errors.New("please use different username")
 	}
 
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 	if err != nil {
-		return "", http.StatusInternalServerError, fmt.Errorf("failed to hash password")
+		return nil, http.StatusInternalServerError, fmt.Errorf("failed to hash password")
 	}
-	user.Password = string(hashedPassword)
 
-	if err := repo.db.WithContext(ctx).Create(&user).Error; err != nil {
-		return "", http.StatusInternalServerError, fmt.Errorf("failed to create user")
+	result, err := tx.ExecContext(ctx, "INSERT INTO users (username, password) VALUES (?, ?)", user.Username, string(hashedPassword))
+	if err != nil {
+		log.Printf("[CreateUser] error on creating user %v, err: %v\n", user.Username, err)
+		return nil, http.StatusInternalServerError, errors.New("error on creating user, please try again later")
+	}
+
+	userId, err := result.LastInsertId()
+	if err != nil {
+		log.Printf("[CreateUser] error on getting userId for user %v, err: %v\n", user.Username, err)
+		return nil, http.StatusInternalServerError, errors.New("error on creating user, please try again later")
 	}
 
 	token, err := utils.GenerateJWT(user.Username)
 	if err != nil {
-		return "", http.StatusInternalServerError, fmt.Errorf("error generating token")
+		log.Printf("[CreateUser] error on generating token for user: %v, err: %v\n", user.Username, err)
+		return nil, http.StatusInternalServerError, errors.New("error on creating user, please try again later")
 	}
 
-	return token, http.StatusCreated, nil
+	if err := tx.Commit(); err != nil {
+		log.Printf("[CreateUser] error on committing transaction: %v\n", err)
+		return nil, http.StatusInternalServerError, errors.New("error on creating user, please try again later")
+	}
+
+	userLogin := &models.UserLoginResponse{
+		UserDetails: models.UserDetails{
+			Username: user.Username,
+			UserId:   int(userId),
+		},
+		Token: token,
+	}
+
+	return userLogin, http.StatusCreated, nil
 }
 
-func (repo *Repository) LoginUser(ctx context.Context, user *models.User) (string, int, error) {
+func (r *Repository) LoginUser(ctx context.Context, user *models.User) (*models.UserLoginResponse, int, error) {
 	var existingUser models.User
-	if err := repo.db.WithContext(ctx).Where("username = ?", user.Username).First(&existingUser).Error; err != nil {
-		return "", http.StatusUnauthorized, fmt.Errorf("invalid username or password")
-	}
-
-	if err := bcrypt.CompareHashAndPassword([]byte(existingUser.Password), []byte(user.Password)); err != nil {
-		return "", http.StatusUnauthorized, fmt.Errorf("invalid username or password")
-	}
-
-	token, err := utils.GenerateJWT(user.Username)
+	err := r.db.QueryRowContext(ctx, "SELECT id, username, password FROM users WHERE username = ?", user.Username).Scan(&existingUser.UserId, &existingUser.Username, &existingUser.Password)
 	if err != nil {
-		return "", http.StatusInternalServerError, fmt.Errorf("error generating token")
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, http.StatusUnauthorized, errors.New("invalid username or password")
+		}
+		log.Printf("[LoginUser] error on retrieving user %v, err: %v\n", user.Username, err)
+		return nil, http.StatusInternalServerError, errors.New("error on logging in, please try again later")
 	}
 
-	return token, http.StatusOK, nil
+	err = bcrypt.CompareHashAndPassword([]byte(existingUser.Password), []byte(user.Password))
+	if err != nil {
+		return nil, http.StatusUnauthorized, errors.New("invalid username or password")
+	}
+
+	token, err := utils.GenerateJWT(existingUser.Username)
+	if err != nil {
+		log.Printf("[LoginUser] error on generating token for user: %v, err: %v\n", existingUser.Username, err)
+		return nil, http.StatusInternalServerError, errors.New("error on logging in, please try again later")
+	}
+
+	userLogin := &models.UserLoginResponse{
+		UserDetails: models.UserDetails{
+			UserId:   existingUser.UserId,
+			Username: existingUser.Username,
+		},
+		Token: token,
+	}
+
+	return userLogin, http.StatusOK, nil
 }
 
-func (repo *Repository) GetAllUsers(ctx context.Context) ([]string, error) {
-	var usernames []string
-	if err := repo.db.WithContext(ctx).Model(&models.User{}).Pluck("username", &usernames).Error; err != nil {
-		log.Printf("[GetAllUsers] error %v\n", err)
-		return nil, err
+func (r *Repository) CreateRoom(ctx context.Context, room *models.Room) (*models.Room, int, error) {
+	roomId := "room:" + room.RoomName
+	exists, err := r.cache.Exists(ctx, roomId).Result()
+	if err != nil {
+		log.Printf("[CreateRoom] error creating room %v, err: %v\n", room.RoomName, err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("error creating room, please try again later")
 	}
-	return usernames, nil
-}
-
-func (repo *Repository) CreateRoom(ctx context.Context, body *models.CreateRoomReqBody, username string) (*models.Room, int, error) {
-	room := &models.Room{
-		RoomName: body.RoomName,
-		Admin:    username,
+	if exists == 1 {
+		return nil, http.StatusConflict, fmt.Errorf("please use a different room name")
 	}
 
-	if err := repo.db.WithContext(ctx).Create(&room).Error; err != nil {
-		log.Printf("[CreateRoom] error creating room: %v\n", err)
-		return nil, http.StatusInternalServerError, fmt.Errorf("error creating room")
+	pipe := r.cache.TxPipeline()
+	pipe.HSet(ctx, "room:metadata:"+room.RoomName, "active_users", 0, "created_at", time.Now().Unix())
+	pipe.Expire(ctx, "room:metadata:"+room.RoomName, 24*time.Hour)
+	_, err = pipe.Exec(ctx)
+	if err != nil {
+		log.Printf("[CreateRoom] error setting room %v, err: %v\n", room.RoomName, err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("error creating room, please try again later")
 	}
 
+	room.RoomId = roomId
 	return room, http.StatusCreated, nil
 }
 
-func (repo *Repository) DeleteRoom(ctx context.Context, roomId int, username string) (int, error) {
-	var room models.Room
-	if err := repo.db.WithContext(ctx).First(&room, roomId).Error; err != nil {
-		return http.StatusNotFound, fmt.Errorf("room not found")
-	}
-
-	if room.Admin != username {
-		return http.StatusForbidden, fmt.Errorf("only the admin can delete the room")
-	}
-
-	if err := repo.db.WithContext(ctx).Delete(&room).Error; err != nil {
-		log.Printf("[DeleteRoom] error deleting room: %v\n", err)
-		return http.StatusInternalServerError, fmt.Errorf("error deleting room")
-	}
-
-	return http.StatusOK, nil
-}
-
-func (repo *Repository) GetUsersRooms(ctx context.Context, username string) ([]*models.Room, int, error) {
-	var rooms []*models.Room
-	err := repo.db.WithContext(ctx).Where("admin = ?", username).Find(&rooms).Error
+func (r *Repository) GetRooms(ctx context.Context) ([]*models.Room, int, error) {
+	keys, err := r.cache.Keys(ctx, "room:metadata:*").Result()
 	if err != nil {
-		log.Printf("[GetUsersRooms] error finding rooms for user %s: %v\n", username, err)
-		return nil, http.StatusInternalServerError, fmt.Errorf("error finding rooms for user")
-	}
-	return rooms, http.StatusOK, nil
-}
-
-func (repo *Repository) AddUsersToRoom(ctx context.Context, body *models.AddUsersToRoomReqBody, username string) (int, error) {
-	var room models.Room
-	if err := repo.db.WithContext(ctx).First(&room, body.RoomId).Error; err != nil {
-		return http.StatusNotFound, fmt.Errorf("room not found")
+		log.Printf("[GetRooms] error fetching rooms, err: %v\n", err)
+		return nil, http.StatusInternalServerError, fmt.Errorf("error fetching rooms")
 	}
 
-	if room.Admin != username {
-		return http.StatusUnauthorized, fmt.Errorf("only the admin can add users to room")
-	}
+	rooms := make([]*models.Room, 0, len(keys))
+	for _, key := range keys {
+		metadata, err := r.cache.HGetAll(ctx, key).Result()
+		if err != nil {
+			log.Printf("[GetRooms] error fetching metadata for %v, err: %v\n", key, err)
+			continue
+		}
 
-	var userRooms []models.UserRooms
-	for _, user := range body.Users {
-		userRooms = append(userRooms, models.UserRooms{
-			Username: user,
-			RoomId:   body.RoomId,
+		roomName := strings.TrimPrefix(key, "room:metadata:")
+		activeUsers, _ := strconv.Atoi(metadata["active_users"])
+		rooms = append(rooms, &models.Room{
+			RoomId:      "room:" + roomName,
+			RoomName:    roomName,
+			ActiveUsers: activeUsers,
 		})
 	}
 
-	if err := repo.db.WithContext(ctx).Create(&userRooms).Error; err != nil {
-		log.Printf("[AddUsersToRoom] error adding users to room %d: %v\n", body.RoomId, err)
-		return http.StatusInternalServerError, fmt.Errorf("error adding users to room")
-	}
-
-	return http.StatusOK, nil
+	return rooms, http.StatusOK, nil
 }
 
-func (repo *Repository) RemoveUserFromRoom(ctx context.Context, roomId int, removeUser, username string) (int, error) {
-	var room models.Room
-	if err := repo.db.WithContext(ctx).First(&room, roomId).Error; err != nil {
-		return http.StatusNotFound, fmt.Errorf("room not found")
+func (r *Repository) IncDecActiveUsers(ctx context.Context, roomId string, val int64) {
+	err := r.cache.HIncrBy(ctx, roomId, "active_users", val).Err()
+	if err != nil {
+		log.Printf("[IncDecActiveUsers] error incrementing active_users for room %v, err: %v\n", roomId, err)
 	}
-
-	if room.Admin != username {
-		return http.StatusUnauthorized, fmt.Errorf("only the admin can remove users from the room")
-	}
-
-	if err := repo.db.WithContext(ctx).Where("room_id = ? AND username = ?", roomId, removeUser).Delete(&models.UserRooms{}).Error; err != nil {
-		log.Printf("[RemoveUserForRoom] error removing user %s from room %d: %v\n", removeUser, roomId, err)
-		return http.StatusInternalServerError, fmt.Errorf("error removing user from room")
-	}
-
-	return http.StatusOK, nil
 }
 
-func (repo *Repository) ListUsersInRoom(ctx context.Context, roomId int) ([]string, int, error) {
-	var usernames []string
-	if err := repo.db.WithContext(ctx).Where("room_id = ?", roomId).Pluck("username", &usernames).Error; err != nil {
-		log.Printf("[ListUsersInRoom] error retrieving users for room %d: %v\n", roomId, err)
-		return nil, http.StatusInternalServerError, fmt.Errorf("error retrieving users for room")
-	}
-	return usernames, http.StatusOK, nil
+func (r *Repository) PublishMessageToChatRoom(ctx context.Context, roomId, msg string) error {
+	return r.cache.Publish(ctx, roomId, msg).Err()
 }
 
-func (repo *Repository) PublishMessageToChatRoom(ctx context.Context, channel, msg string) error {
-	return repo.redis.Publish(ctx, channel, msg).Err()
-}
-
-func (repo *Repository) SubscribeToChatRoom(ctx context.Context, conn *websocket.Conn, channel string) {
-	pubSub := repo.redis.Subscribe(ctx, channel)
+func (r *Repository) SubscribeToChatRoom(ctx context.Context, conn *websocket.Conn, roomId string, done chan struct{}) {
+	pubSub := r.cache.Subscribe(ctx, roomId)
 	defer pubSub.Close()
 
 	ch := pubSub.Channel()
-	for msg := range ch {
-		if err := conn.WriteMessage(websocket.TextMessage, []byte(msg.Payload)); err != nil {
-			log.Printf("[SubscribeToChatRoom] Failed to send msg to websocket for channel:%v : %v", channel, err)
+	for {
+		select {
+		case <-ctx.Done():
 			return
+		case <-done:
+			return
+		case msg := <-ch:
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(msg.Payload)); err != nil {
+				log.Printf("[SubscribeToChatRoom] Failed to send msg to websocket for channel:%v : %v", roomId, err)
+				return
+			}
 		}
 	}
 }
