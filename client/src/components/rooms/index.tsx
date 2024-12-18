@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import toast, { Toaster } from "react-hot-toast";
 import { useAuthStore } from "../../store/authStore";
-import { Room } from "../types";
+import { RoomDetails } from "../types";
 
 const RoomLayout = () => {
   const { user } = useAuthStore((state) => state);
-  const [rooms, setRooms] = useState<Room[]>([]);
+  const [rooms, setRooms] = useState<RoomDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [roomName, setRoomName] = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchRooms = async () => {
@@ -83,6 +85,10 @@ const RoomLayout = () => {
     }
   };
 
+  const handleRoomClick = (roomId: string) => {
+    navigate(`/rooms/${roomId}`);
+  };
+
   if (loading) {
     return <div>Loading...</div>;
   }
@@ -120,7 +126,8 @@ const RoomLayout = () => {
               {rooms.map((room) => (
                 <div
                   key={room.room_id}
-                  className="p-4 bg-gray-200 rounded-lg shadow-md"
+                  className="p-4 bg-gray-200 rounded-lg shadow-md cursor-pointer"
+                  onClick={() => handleRoomClick(room.room_id)}
                 >
                   <h2 className="text-xl font-semibold">{room.room_name}</h2>
                   <p className="text-gray-700">

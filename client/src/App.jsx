@@ -5,6 +5,7 @@ import Login from "./components/auth/Login";
 import Signup from "./components/auth/Signup";
 import Home from "./components/home/Home";
 import RoomLayout from "./components/rooms";
+import Room from "./components/rooms/Room";
 
 function App() {
   return (
@@ -16,6 +17,7 @@ function App() {
           <Route path="signup" element={<Signup />} />
         </Route>
         <Route path="/rooms" element={<RoomLayout />} />
+        <Route path="/rooms/:roomId" element={<Room />} />
       </Routes>
     </Router>
   );

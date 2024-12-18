@@ -7,8 +7,15 @@ export interface AuthResponse {
   };
 }
 
-export interface Room {
+export interface RoomDetails {
   room_id: string;
   room_name: string;
   active_users: number;
+  users: string[];
+}
+
+export interface Message {
+  user: string;
+  type: "JOIN" | "LEAVE" | "CHAT";
+  content: string;
 }

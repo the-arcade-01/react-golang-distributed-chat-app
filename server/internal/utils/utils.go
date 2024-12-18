@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"errors"
 	"os"
 	"time"
 
@@ -30,4 +31,23 @@ func GenerateJWT(username string) (string, error) {
 	}
 
 	return tokenString, nil
+}
+
+func ValidateAuthToken(tokenString string) (string, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &claims{}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, errors.New("unexpected signing method")
+		}
+		return jwtKey, nil
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	if claims, ok := token.Claims.(*claims); ok && token.Valid {
+		return claims.Username, nil
+	}
+
+	return "", errors.New("invalid token")
 }
