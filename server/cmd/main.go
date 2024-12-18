@@ -47,13 +47,15 @@ func (s *server) mountHandlers() {
 	s.router.Get("/", svc.Greet)
 	s.router.Post("/auth/signup", svc.SignUp)
 	s.router.Post("/auth/login", svc.Login)
+	s.router.Get("/ws", svc.HandleWs)
 
 	s.router.Group(func(r chi.Router) {
 		r.Use(jwtauth.Verifier(tokenAuth))
 		r.Use(jwtauth.Authenticator(tokenAuth))
 		r.Post("/rooms", svc.CreateRoom)
 		r.Get("/rooms", svc.GetRooms)
-		r.Get("/ws", svc.HandleWs)
+		// TODO: send this info through sse or ws for add/remove info
+		r.Get("/rooms/{room_id}", svc.GetRoomDetails)
 	})
 }
 
