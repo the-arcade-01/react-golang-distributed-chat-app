@@ -98,9 +98,18 @@ const RoomLayout = () => {
       <Toaster />
       <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-4">
         <div className="w-full max-w-4xl p-8 bg-white rounded-lg shadow-lg">
-          <h1 className="text-2xl font-bold text-center text-black mb-4">
-            Available Chat Rooms
-          </h1>
+          <div className="flex items-center justify-between mb-4">
+            <button
+              onClick={() => navigate("/")}
+              className="text-green-500 hover:text-green-700"
+            >
+              Back
+            </button>
+            <h1 className="text-2xl font-bold text-center text-black">
+              Available Chat Rooms
+            </h1>
+            <div></div> {/* Placeholder to keep the title centered */}
+          </div>
           <form onSubmit={handleCreateRoom} className="mb-8">
             <div className="flex items-center space-x-4">
               <input

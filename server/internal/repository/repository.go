@@ -128,6 +128,7 @@ func (r *Repository) LoginUser(ctx context.Context, user *models.User) (*models.
 	return userLogin, http.StatusOK, nil
 }
 
+// CreateRoom TODO: this is breaking, check on transaction
 func (r *Repository) CreateRoom(ctx context.Context, room *models.Room) (*models.Room, int, error) {
 	roomId := "room:" + room.RoomName
 	exists, err := r.cache.Exists(ctx, roomId).Result()
