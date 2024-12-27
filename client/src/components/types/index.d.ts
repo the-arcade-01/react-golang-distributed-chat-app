@@ -10,8 +10,7 @@ export interface AuthResponse {
 export interface RoomDetails {
   room_id: string;
   room_name: string;
-  active_users: number;
-  users: string[];
+  admin: string;
 }
 
 export interface Message {

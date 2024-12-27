@@ -119,7 +119,7 @@ const Room = () => {
               <div className="absolute right-0 mt-2 w-48 p-4 bg-white border border-gray-300 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity">
                 <p className="text-gray-700">Room ID: {roomDetails.room_id}</p>
                 <p className="text-gray-700">
-                  Active Users: {roomDetails.active_users}
+                  Admin: {roomDetails.admin || "Anonymous"}
                 </p>
               </div>
             </div>

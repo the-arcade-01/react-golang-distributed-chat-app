@@ -54,8 +54,8 @@ func (s *server) mountHandlers() {
 		r.Use(jwtauth.Authenticator(tokenAuth))
 		r.Post("/rooms", svc.CreateRoom)
 		r.Get("/rooms", svc.GetRooms)
-		// TODO: send this info through sse or ws for add/remove info
 		r.Get("/rooms/{room_id}", svc.GetRoomDetails)
+		r.Delete("/rooms/{room_id}", svc.DeleteRoom)
 	})
 }
 

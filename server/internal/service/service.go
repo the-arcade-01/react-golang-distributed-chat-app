@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"sync"
 
 	"github.com/go-chi/chi/v5"
@@ -111,7 +110,7 @@ func (s *Service) CreateRoom(w http.ResponseWriter, r *http.Request) {
 			Data: nil,
 		})
 	}
-	room, status, err := s.repo.CreateRoom(r.Context(), body)
+	room, status, err := s.repo.CreateRoom(r.Context(), body, username)
 	if err != nil {
 		models.ResponseWithJSON(w, status, models.Response{
 			Msg:  err.Error(),
@@ -197,6 +196,46 @@ func (s *Service) GetRoomDetails(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Service) DeleteRoom(w http.ResponseWriter, r *http.Request) {
+	_, claims, err := jwtauth.FromContext(r.Context())
+	if err != nil {
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.Response{
+			Msg:  "invalid auth credentials",
+			Data: nil,
+		})
+		return
+	}
+	username, ok := claims["username"].(string)
+	if !ok || username == "" {
+		models.ResponseWithJSON(w, http.StatusUnauthorized, models.Response{
+			Msg:  "invalid auth credentials",
+			Data: nil,
+		})
+		return
+	}
+
+	roomId := chi.URLParam(r, "room_id")
+	if roomId == "" {
+		models.ResponseWithJSON(w, http.StatusBadRequest, models.Response{
+			Msg:  "please provide room_id",
+			Data: nil,
+		})
+		return
+	}
+	status, err := s.repo.DeleteRoom(r.Context(), roomId, username)
+	if err != nil {
+		models.ResponseWithJSON(w, status, models.Response{
+			Msg:  err.Error(),
+			Data: nil,
+		})
+		return
+	}
+	models.ResponseWithJSON(w, status, models.Response{
+		Msg:  "room deleted successfully",
+		Data: nil,
+	})
+}
+
 func (s *Service) HandleWs(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if token == "" {
@@ -234,12 +273,12 @@ func (s *Service) HandleWs(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	metadataKey := "room:metadata:" + strings.TrimPrefix(roomId, "room:")
-	s.repo.IncDecActiveUsers(ctx, metadataKey, 1, username)
+	// metadataKey := "room:metadata:" + strings.TrimPrefix(roomId, "room:")
+	// s.repo.IncDecActiveUsers(ctx, metadataKey, 1, username)
 
-	defer func() {
-		s.repo.IncDecActiveUsers(ctx, metadataKey, -1, username)
-	}()
+	// defer func() {
+	// 	s.repo.IncDecActiveUsers(ctx, metadataKey, -1, username)
+	// }()
 
 	joinMsg := fmt.Sprintf("%s has joined the room.", username)
 	err = s.repo.PublishMessageToChatRoom(ctx, roomId, "server", joinMsg, models.JoinMsgType)

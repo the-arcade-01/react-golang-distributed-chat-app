@@ -9,10 +9,9 @@ const (
 )
 
 type Room struct {
-	RoomId      string   `json:"room_id"`
-	RoomName    string   `json:"room_name"`
-	ActiveUsers int      `json:"active_users"`
-	Users       []string `json:"users"`
+	RoomId   string `json:"room_id"`
+	RoomName string `json:"room_name"`
+	Admin    string `json:"admin"`
 }
 
 type Message struct {

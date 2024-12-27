@@ -139,9 +139,7 @@ const RoomLayout = () => {
                   onClick={() => handleRoomClick(room.room_id)}
                 >
                   <h2 className="text-xl font-semibold">{room.room_name}</h2>
-                  <p className="text-gray-700">
-                    Active Users: {room.active_users}
-                  </p>
+                  <p className="text-gray-700">Admin: {room.admin}</p>
                 </div>
               ))}
             </div>

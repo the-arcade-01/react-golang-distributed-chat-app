@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -128,8 +127,7 @@ func (r *Repository) LoginUser(ctx context.Context, user *models.User) (*models.
 	return userLogin, http.StatusOK, nil
 }
 
-// CreateRoom TODO: this is breaking, check on transaction
-func (r *Repository) CreateRoom(ctx context.Context, room *models.Room) (*models.Room, int, error) {
+func (r *Repository) CreateRoom(ctx context.Context, room *models.Room, username string) (*models.Room, int, error) {
 	roomId := "room:" + room.RoomName
 	exists, err := r.cache.Exists(ctx, roomId).Result()
 	if err != nil {
@@ -141,10 +139,8 @@ func (r *Repository) CreateRoom(ctx context.Context, room *models.Room) (*models
 	}
 
 	pipe := r.cache.TxPipeline()
-	pipe.HSet(ctx, "room:metadata:"+room.RoomName, "active_users", 0, "created_at", time.Now().Unix())
+	pipe.HSet(ctx, "room:metadata:"+room.RoomName, "admin", username, "created_at", time.Now().Unix())
 	pipe.Expire(ctx, "room:metadata:"+room.RoomName, 24*time.Hour)
-	pipe.SAdd(ctx, "room:users:"+room.RoomName)
-	pipe.Expire(ctx, "room:users:"+room.RoomName, 24*time.Hour)
 	_, err = pipe.Exec(ctx)
 	if err != nil {
 		log.Printf("[CreateRoom] error setting room %v, err: %v\n", room.RoomName, err)
@@ -152,6 +148,7 @@ func (r *Repository) CreateRoom(ctx context.Context, room *models.Room) (*models
 	}
 
 	room.RoomId = roomId
+	room.Admin = username
 	return room, http.StatusCreated, nil
 }
 
@@ -171,11 +168,10 @@ func (r *Repository) GetRooms(ctx context.Context) ([]*models.Room, int, error) 
 		}
 
 		roomName := strings.TrimPrefix(key, "room:metadata:")
-		activeUsers, _ := strconv.Atoi(metadata["active_users"])
 		rooms = append(rooms, &models.Room{
-			RoomId:      "room:" + roomName,
-			RoomName:    roomName,
-			ActiveUsers: activeUsers,
+			RoomId:   "room:" + roomName,
+			RoomName: roomName,
+			Admin:    metadata["admin"],
 		})
 	}
 
@@ -184,11 +180,9 @@ func (r *Repository) GetRooms(ctx context.Context) ([]*models.Room, int, error) 
 
 func (r *Repository) GetRoomDetails(ctx context.Context, roomId string) (*models.Room, int, error) {
 	metadataKey := "room:metadata:" + strings.TrimPrefix(roomId, "room:")
-	usersKey := "room:users:" + strings.TrimPrefix(roomId, "room:")
 
 	pipe := r.cache.TxPipeline()
 	metadataCmd := pipe.HGetAll(ctx, metadataKey)
-	usersCmd := pipe.SMembers(ctx, usersKey)
 
 	_, err := pipe.Exec(ctx)
 	if err != nil {
@@ -197,15 +191,34 @@ func (r *Repository) GetRoomDetails(ctx context.Context, roomId string) (*models
 	}
 
 	metadata := metadataCmd.Val()
-	activeUsers, _ := strconv.Atoi(metadata["active_users"])
-	usernames := usersCmd.Val()
 
 	return &models.Room{
-		RoomId:      roomId,
-		RoomName:    strings.TrimPrefix(roomId, "room:"),
-		ActiveUsers: activeUsers,
-		Users:       usernames,
+		RoomId:   roomId,
+		RoomName: strings.TrimPrefix(roomId, "room:"),
+		Admin:    metadata["admin"],
 	}, http.StatusOK, nil
+}
+
+func (r *Repository) DeleteRoom(ctx context.Context, roomId string, username string) (int, error) {
+	metadataKey := "room:metadata:" + strings.TrimPrefix(roomId, "room:")
+
+	pipe := r.cache.TxPipeline()
+	metadataCmd := pipe.HGetAll(ctx, metadataKey)
+	metadata := metadataCmd.Val()
+
+	if metadata["admin"] == "" || metadata["admin"] != username {
+		return http.StatusUnauthorized, fmt.Errorf("you are not authorized to delete this room")
+	}
+
+	pipe.Del(ctx, metadataKey)
+
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		log.Printf("[DeleteRoom] error deleting room %v, err: %v\n", roomId, err)
+		return http.StatusInternalServerError, fmt.Errorf("error deleting room, please try again later")
+	}
+
+	return http.StatusOK, nil
 }
 
 func (r *Repository) IncDecActiveUsers(ctx context.Context, roomId string, val int64, username string) {
