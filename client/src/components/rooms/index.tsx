@@ -85,6 +85,40 @@ const RoomLayout = () => {
     }
   };
 
+  const handleDeleteRoom = async (roomId: string) => {
+    try {
+      const response = await fetch(
+        //@ts-ignore
+        `${import.meta.env.VITE_API_URL}/rooms/${roomId}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${user?.token}`,
+          },
+        }
+      );
+
+      if (response.status >= 400 && response.status <= 500) {
+        const errorData = await response.json();
+        toast.error(errorData.message);
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error("Network response was not ok");
+      }
+
+      setRooms((prevRooms) =>
+        prevRooms.filter((room) => room.room_id !== roomId)
+      );
+      toast.success("Room deleted successfully!");
+    } catch (error) {
+      console.error("There was a problem with the delete room request:", error);
+      toast.error("An unexpected error occurred. Please try again.");
+    }
+  };
+
   const handleRoomClick = (roomId: string) => {
     navigate(`/rooms/${roomId}`);
   };
@@ -140,6 +174,17 @@ const RoomLayout = () => {
                 >
                   <h2 className="text-xl font-semibold">{room.room_name}</h2>
                   <p className="text-gray-700">Admin: {room.admin}</p>
+                  {room.admin === user?.username && (
+                    <button
+                      className="mt-2 px-4 py-2 bg-red-500 text-white rounded"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteRoom(room.room_id);
+                      }}
+                    >
+                      Delete
+                    </button>
+                  )}
                 </div>
               ))}
             </div>

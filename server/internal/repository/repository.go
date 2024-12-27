@@ -201,18 +201,18 @@ func (r *Repository) GetRoomDetails(ctx context.Context, roomId string) (*models
 
 func (r *Repository) DeleteRoom(ctx context.Context, roomId string, username string) (int, error) {
 	metadataKey := "room:metadata:" + strings.TrimPrefix(roomId, "room:")
-
-	pipe := r.cache.TxPipeline()
-	metadataCmd := pipe.HGetAll(ctx, metadataKey)
-	metadata := metadataCmd.Val()
-
+	metadata, err := r.cache.HGetAll(ctx, metadataKey).Result()
+	if err != nil {
+		log.Printf("[DeleteRoom] error fetching metadata for room %v, err: %v\n", roomId, err)
+		return http.StatusInternalServerError, fmt.Errorf("error deleting room, please try again later")
+	}
 	if metadata["admin"] == "" || metadata["admin"] != username {
 		return http.StatusUnauthorized, fmt.Errorf("you are not authorized to delete this room")
 	}
 
+	pipe := r.cache.TxPipeline()
 	pipe.Del(ctx, metadataKey)
-
-	_, err := pipe.Exec(ctx)
+	_, err = pipe.Exec(ctx)
 	if err != nil {
 		log.Printf("[DeleteRoom] error deleting room %v, err: %v\n", roomId, err)
 		return http.StatusInternalServerError, fmt.Errorf("error deleting room, please try again later")
