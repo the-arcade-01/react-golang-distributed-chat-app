@@ -2,9 +2,7 @@
 
 A simple distributed chat app example built using Golang, ReactJs, Redis and Websockets.
 
-![Watch the demo](docs/demo.mov)
-
-### Architecture
+[![Watch the video](https://img.youtube.com/vi/n0669MY5Gvs/maxresdefault.jpg)](https://www.youtube.com/watch?v=n0669MY5Gvs)
 
 ### Installation
 
