@@ -1,3 +1,1 @@
-## go-chat-app
-
-simple chat app example built using golang, reactjs and websockets
+## Distributed Chat App in Golang, React.js & Redis
