@@ -2,7 +2,6 @@ package internal
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -43,20 +42,6 @@ func newHandlers() *handlers {
 	}
 }
 
-func (h *handlers) greet(w http.ResponseWriter, r *http.Request) {
-	ResponseWithJSON(w, http.StatusOK, Response{Status: http.StatusOK, Message: "Hello, World"})
-}
-
-func (h *handlers) checkExists(w http.ResponseWriter, r *http.Request) {
-	key := r.URL.Query().Get("key")
-	result := h.cacheRepo.exists(r.Context(), key)
-	if result {
-		ResponseWithJSON(w, http.StatusOK, Response{Status: http.StatusOK, Message: "Exists"})
-		return
-	}
-	ResponseWithJSON(w, http.StatusNotFound, Response{Status: http.StatusNotFound, Message: "Not Exists"})
-}
-
 func (h *handlers) handleWS(w http.ResponseWriter, r *http.Request) {
 	username := r.URL.Query().Get("username")
 	if username == "" {
@@ -74,18 +59,14 @@ func (h *handlers) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	Log.InfoContext(r.Context(), "WebSocket connection established", "username", username)
 
-	go h.writePump(context.Background(), conn)
-	go h.readPump(context.Background(), conn, username)
+	ctx := context.Background()
+	go h.writePump(ctx, conn)
+	go h.readPump(ctx, conn, username)
 }
 
 func (h *handlers) readPump(ctx context.Context, conn *websocket.Conn, username string) {
 	defer func() {
-		payload, err := json.Marshal(&Message{
-			Timestamp: time.Now().UnixMilli(),
-			Username:  username,
-			Type:      "LEAVE",
-			Content:   fmt.Sprintf("%v left the room", username),
-		})
+		payload, err := GetJSONMessage(username, "LEAVE", fmt.Sprintf("%v left the room", username))
 		if err == nil {
 			h.cacheRepo.publish(ctx, Envs.CHAT_CHANNEL, string(payload))
 		}
@@ -99,12 +80,7 @@ func (h *handlers) readPump(ctx context.Context, conn *websocket.Conn, username 
 		return nil
 	})
 
-	payload, err := json.Marshal(&Message{
-		Timestamp: time.Now().UnixMilli(),
-		Username:  username,
-		Type:      "JOIN",
-		Content:   fmt.Sprintf("%v joined the room", username),
-	})
+	payload, err := GetJSONMessage(username, "JOIN", fmt.Sprintf("%v joined the room", username))
 	if err == nil {
 		h.cacheRepo.publish(ctx, Envs.CHAT_CHANNEL, string(payload))
 	}
@@ -145,6 +121,14 @@ func (h *handlers) writePump(ctx context.Context, conn *websocket.Conn) {
 				return
 			}
 
+			// Expliciting checking message size, even though checkOrigin check is added
+			// so that any manuall attempt to direct conn on ws with the same origin
+			// doesn't cause cause conn break
+			if len(msg.Payload) > maxMessageSize {
+				Log.ErrorContext(ctx, "message size exceeds limit", "size", len(msg.Payload))
+				continue
+			}
+
 			// if message writing takes more time than writeWait,
 			// which can means client as slow internet
 			// and then just hang the conn and UI will restablish it
@@ -164,10 +148,3 @@ func (h *handlers) writePump(ctx context.Context, conn *websocket.Conn) {
 		}
 	}
 }
-
-/**
-TODO:
-	use mysql table to store message, use batch insert and cron and clean up or limit only last 10 message insert, something like that, send last 10 message on ws conn
-	mysql table might look like this
-	timestamp, jsontext -> &Message{}
-*/

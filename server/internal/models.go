@@ -3,6 +3,7 @@ package internal
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 )
 
 type Message struct {
@@ -21,4 +22,18 @@ func ResponseWithJSON(w http.ResponseWriter, status int, payload interface{}) {
 	w.Header().Set("Content-type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(payload)
+}
+
+func GetJSONMessage(username, tp, content string) (string, error) {
+	payload, err := json.Marshal(&Message{
+		Timestamp: time.Now().UnixMilli(),
+		Username:  username,
+		Type:      tp,
+		Content:   content,
+	})
+
+	if err != nil {
+		return "", err
+	}
+	return string(payload), nil
 }
