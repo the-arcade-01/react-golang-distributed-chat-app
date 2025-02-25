@@ -1,4 +1,4 @@
-FROM golang:1.24
+FROM golang:1.24 AS builder
 
 WORKDIR /app
 
@@ -8,8 +8,14 @@ RUN go mod download
 
 COPY .. .
 
-RUN go build -o chat-app ./cmd
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o chat-app ./cmd
 
-EXPOSE 8080
+FROM alpine:3.18
 
-CMD [ "./chat-app" ]
+WORKDIR /app
+
+COPY --from=builder /app .
+
+RUN chmod +x /app/chat-app
+
+CMD ["/app/chat-app"]
