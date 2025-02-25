@@ -79,6 +79,13 @@ func (h *handlersStreams) readPump(ctx context.Context, conn *websocket.Conn, us
 		conn.Close()
 	}()
 
+	conn.SetReadLimit(maxMessageSize)
+	conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(appData string) error {
+		conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+
 	payload, err := GetJSONMessage(username, "JOIN", fmt.Sprintf("%v joined the room", username))
 	if err == nil {
 		h.repo.writeToStream(ctx, Envs.STREAM_KEY, string(payload))
@@ -133,6 +140,11 @@ func (h *handlersStreams) writePump(ctx context.Context, conn *websocket.Conn) {
 				for _, msg := range stream.Messages {
 					lastMsgID = msg.ID
 					payload := msg.Values["message"].(string)
+
+					// if message writing takes more time than writeWait,
+					// which can means client as slow internet
+					// and then just hang the conn and UI will restablish it
+					conn.SetWriteDeadline(time.Now().Add(writeWait))
 					if err := conn.WriteMessage(websocket.TextMessage, []byte(payload)); err != nil {
 						Log.ErrorContext(ctx, "error sending messsage to websocket", "error", err)
 						return

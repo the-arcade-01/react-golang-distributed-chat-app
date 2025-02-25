@@ -2,8 +2,6 @@
 
 Test the app here: https://chat.arcade.build
 
-Read the blog for implementation details [Distributed Chat App in Golang, React.js & Redis](https://dev.to/the-arcade-01/google-oauth-20-flow-in-golang-and-reactjs-536a)
-
 ### Run this project
 
 - For running the web
@@ -25,7 +23,10 @@ Read the blog for implementation details [Distributed Chat App in Golang, React.
         REDIS_PWD=<redis_pwd>
         REDIS_DB=<redis_db>
         CHAT_CHANNEL=<channel>
-        WEB_URL=http://localhost:5173
+        WS_TYPE=pubsub
+        MAX_CHAT_LEN=10
+        STREAM_KEY=<stream>
+        STREAM_CONSUMER_GROUP=<cg>
     ```
   - Choose which message system to run, redis pubsub or redis streams
     ```shell
@@ -36,5 +37,3 @@ Read the blog for implementation details [Distributed Chat App in Golang, React.
         ~> cd server/scripts
         ~> docker compose --env-file ../.env up
     ```
-
-### Architecture

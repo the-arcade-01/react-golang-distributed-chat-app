@@ -15,11 +15,14 @@ const Chat: React.FC = () => {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const ws = useRef<WebSocket | null>(null);
+  const chatContainerRef = useRef<HTMLDivElement | null>(null);
+  const joinLeaveContainerRef = useRef<HTMLDivElement | null>(null);
 
-  if (!username) {
-    navigate("/");
-    return null;
-  }
+  useEffect(() => {
+    if (!username) {
+      navigate("/");
+    }
+  }, [username]);
 
   useEffect(() => {
     if (username) {
@@ -52,6 +55,17 @@ const Chat: React.FC = () => {
     }
   }, [username]);
 
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop =
+        chatContainerRef.current.scrollHeight;
+    }
+    if (joinLeaveContainerRef.current) {
+      joinLeaveContainerRef.current.scrollTop =
+        joinLeaveContainerRef.current.scrollHeight;
+    }
+  }, [messages]);
+
   const handleSendMessage = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (ws.current && message.trim() !== "") {
@@ -72,7 +86,7 @@ const Chat: React.FC = () => {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100 p-4">
-      <div className="w-full max-w-2xl p-8 bg-white rounded-lg shadow-lg">
+      <div className="w-full max-w-4xl p-8 bg-white rounded-lg shadow-lg">
         <h1 className="text-3xl font-bold text-center text-blue-600 mb-4">
           Chat Room
         </h1>
@@ -84,55 +98,71 @@ const Chat: React.FC = () => {
             Back to Home
           </button>
         </div>
-        <div className="flex flex-col space-y-4">
-          <div className="flex flex-col space-y-2 overflow-y-auto h-[600px] p-4 border border-gray-300 rounded-lg">
-            {messages.map((msg, index) => (
-              <div
-                key={index}
-                className={`p-2 rounded-lg ${
-                  msg.type === "JOIN"
-                    ? "bg-green-200 text-green-800"
-                    : msg.type === "LEAVE"
-                    ? "bg-red-200 text-red-800"
-                    : "bg-gray-200"
-                }`}
-              >
-                <div className="text-xs text-gray-500">
-                  {new Date(msg.timestamp).toLocaleTimeString()}
-                </div>
-                {msg.type === "CHAT" ? (
-                  <>
+        <div className="flex space-x-4">
+          <div className="flex flex-col space-y-4 w-2/3">
+            <div
+              ref={chatContainerRef}
+              className="flex flex-col space-y-2 overflow-y-auto h-[600px] p-4 border border-gray-300 rounded-lg"
+            >
+              {messages
+                .filter((msg) => msg.type === "CHAT")
+                .map((msg, index) => (
+                  <div key={index} className="p-2 rounded-lg bg-gray-200">
+                    <div className="text-xs text-gray-500">
+                      {new Date(msg.timestamp).toLocaleTimeString()}
+                    </div>
                     <strong>{msg.username}: </strong>
                     {msg.content}
-                  </>
-                ) : (
-                  <em>{msg.content}</em>
-                )}
-              </div>
-            ))}
-          </div>
-          <form
-            onSubmit={handleSendMessage}
-            className="flex items-center space-x-4"
-          >
-            <input
-              type="text"
-              className="flex-grow p-2 border border-blue-300 rounded-lg"
-              placeholder="Type your message..."
-              value={message}
-              onChange={(e) => {
-                if (e.target.value.length <= 200) {
-                  setMessage(e.target.value);
-                }
-              }}
-            />
-            <button
-              type="submit"
-              className="py-2 px-4 text-white bg-green-500 rounded-lg font-medium hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500"
+                  </div>
+                ))}
+            </div>
+            <form
+              onSubmit={handleSendMessage}
+              className="flex items-center space-x-4"
             >
-              Send
-            </button>
-          </form>
+              <input
+                type="text"
+                className="flex-grow p-2 border border-blue-300 rounded-lg"
+                placeholder="Type your message..."
+                value={message}
+                onChange={(e) => {
+                  if (e.target.value.length <= 200) {
+                    setMessage(e.target.value);
+                  }
+                }}
+              />
+              <button
+                type="submit"
+                className="py-2 px-4 text-white bg-green-500 rounded-lg font-medium hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500"
+              >
+                Send
+              </button>
+            </form>
+          </div>
+          <div className="flex flex-col space-y-4 w-1/3">
+            <div
+              ref={joinLeaveContainerRef}
+              className="flex flex-col space-y-2 overflow-y-auto h-[600px] p-4 border border-gray-300 rounded-lg"
+            >
+              {messages
+                .filter((msg) => msg.type === "JOIN" || msg.type === "LEAVE")
+                .map((msg, index) => (
+                  <div
+                    key={index}
+                    className={`p-2 rounded-lg ${
+                      msg.type === "JOIN"
+                        ? "bg-green-200 text-green-800"
+                        : "bg-red-200 text-red-800"
+                    }`}
+                  >
+                    <div className="text-xs text-gray-500">
+                      {new Date(msg.timestamp).toLocaleTimeString()}
+                    </div>
+                    <em>{msg.content}</em>
+                  </div>
+                ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>
