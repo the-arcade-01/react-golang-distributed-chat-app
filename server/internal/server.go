@@ -8,6 +8,10 @@ func Run() {
 	handlers := newHandlers()
 	handlersStreams := newHandlersStreams()
 
+	http.HandleFunc("/chat/ping", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
 	if Envs.WS_TYPE == "pubsub" {
 		Log.Info("pubsub ws established")
 		http.HandleFunc("/chat/ws", func(w http.ResponseWriter, r *http.Request) {
