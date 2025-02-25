@@ -1,49 +1,39 @@
-## go-chat-app
+## Distributed Chat App in Golang, React.js & Redis
 
-A simple distributed chat app example built using Golang, ReactJs, Redis and Websockets.
+Test the app here: https://chat.arcade.build
 
-[![Watch the video](https://img.youtube.com/vi/n0669MY5Gvs/maxresdefault.jpg)](https://www.youtube.com/watch?v=n0669MY5Gvs)
+### Run this project
 
-### Installation
-
-We will use docker for running the application. First, create `.env` file in server directory
-
-<details>
-<summary> server/.env </summary>
-
-```jsx
-DB_DRIVER=mysql
-DB_URL=<user>:<password>@tcp(<mysql_docker_container_name>:3306)/<db_name>?parseTime=true
-MYSQL_ROOT_PASSWORD=<password>
-MYSQL_DATABASE=<db_name>
-REDIS_ADDR=<redis_docker_container_name>:6379
-REDIS_PWD=
-JWT_SECRET_KEY=<secret_key>
-```
-
-</details>
-
-For client, check in `client/docker-compose.yml` and change the `VITE_API_URL` as per your configuration.
-
-For running the application, `cd` into client and server directory and run the below cmds in separate terminals
-
-<details>
-<summary>Commands</summary>
-
-```jsx
-~/client > docker compose up --build
-~/server > docker compose up --build
-```
-
-</details>
-
-### Tech
-
-Build with:
-
-- Golang
-- ReactJs
-- Redis
-- MySQL
-- Docker
-- Websockets
+- For running the web
+  1. Create `.env` file in the `web` folder
+     ```shell
+         VITE_API_URL=ws://localhost:8080/chat/ws
+     ```
+  2. Use npm to start the web
+     ```shell
+        ~> cd web
+        ~> npm install
+        ~> npm run dev
+     ```
+- For running the server
+  - Create `.env` file and update the env variables from `.env.example` file
+    ```shell
+        ENV=development
+        REDIS_ADDR=<redis_container_name>:6379
+        REDIS_PWD=<redis_pwd>
+        REDIS_DB=<redis_db>
+        CHAT_CHANNEL=<channel>
+        WS_TYPE=pubsub
+        MAX_CHAT_LEN=10
+        STREAM_KEY=<stream>
+        STREAM_CONSUMER_GROUP=<cg>
+    ```
+  - Choose which message system to run, redis pubsub or redis streams
+    ```shell
+        WS_TYPE=pubsub # for streams keep it empty
+    ```
+  - Use docker for running the server app, all the services are listed in `scripts/docker-compose.yml`
+    ```shell
+        ~> cd server/scripts
+        ~> docker compose --env-file ../.env up
+    ```
