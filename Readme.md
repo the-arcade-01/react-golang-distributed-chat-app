@@ -2,6 +2,9 @@
 
 Test the app here: https://chat.arcade.build
 
+Read the blog for more implementation details:
+https://aashishkoshti.in/blog/distributed-chat-app
+
 ### Run this project
 
 - For running the web
